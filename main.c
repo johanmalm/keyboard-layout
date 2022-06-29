@@ -346,19 +346,22 @@ print_keyboard_layout(struct seat *seat)
 	}
 	const char *layout_text = NULL;
 	xkb_layout_index_t num_layout = xkb_keymap_num_layouts(seat->xkb.keymap);
-	if (num_layout > 1) {
-		xkb_layout_index_t curr_layout = 0;
+	xkb_layout_index_t curr_layout = 0;
 
-		/* Advance to the first active layout (if any) */
-		while (curr_layout < num_layout
-				&& xkb_state_layout_index_is_active(seat->xkb.state,
-				curr_layout, XKB_STATE_LAYOUT_EFFECTIVE) != 1) {
-			++curr_layout;
-		}
-		/* Handle invalid index if none are active */
-		layout_text = xkb_keymap_layout_get_name(seat->xkb.keymap, curr_layout);
-		printf("%s\n", layout_text);
+	/* Advance to the first active layout (if any) */
+	while (curr_layout < num_layout
+			&& xkb_state_layout_index_is_active(seat->xkb.state,
+			curr_layout, XKB_STATE_LAYOUT_EFFECTIVE) != 1) {
+		++curr_layout;
 	}
+
+	if (curr_layout == num_layout) {
+		printf("unknown\n");
+		return;
+	}
+
+	layout_text = xkb_keymap_layout_get_name(seat->xkb.keymap, curr_layout);
+	printf("%s\n", layout_text);
 }
 
 #define DIE_ON(condition, message) do { \
