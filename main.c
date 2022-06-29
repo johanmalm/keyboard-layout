@@ -20,16 +20,9 @@ struct state {
 	struct wl_display *display;
 	struct wl_compositor *compositor;
 	struct wl_shm *shm;
-	struct wl_list outputs;
 	struct surface *surface;
 	struct loop *eventloop;
 	struct zwlr_layer_shell_v1 *layer_shell;
-};
-
-struct output {
-	struct state *state;
-	struct wl_output *wl_output;
-	struct wl_list link; /* state::outputs */
 };
 
 struct seat {
@@ -44,7 +37,6 @@ struct seat {
 
 struct surface {
 	struct state *state;
-	struct wl_output *wl_output;
 	struct wl_surface *surface;
 	struct zwlr_layer_surface_v1 *layer_surface;
 };
@@ -89,7 +81,7 @@ surface_layer_surface_create(struct surface *surface)
 
 	assert(surface->surface);
 	surface->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
-		state->layer_shell, surface->surface, surface->wl_output,
+		state->layer_shell, surface->surface, NULL,
 		ZWLR_LAYER_SHELL_V1_LAYER_TOP, "keyboard-layout");
 	assert(surface->layer_surface);
 
@@ -226,67 +218,6 @@ seat_init(struct state *state, struct wl_seat *wl_seat)
 }
 
 static void
-handle_wl_output_geometry(void *data, struct wl_output *wl_output,
-		int32_t x, int32_t y, int32_t physical_width,
-		int32_t physical_height, int32_t subpixel, const char *make,
-		const char *model, int32_t transform)
-{
-	/* nop */
-}
-
-static void
-handle_wl_output_mode(void *data, struct wl_output *wl_output, uint32_t flags,
-		int32_t width, int32_t height, int32_t refresh)
-{
-	/* nop */
-}
-
-static void
-handle_wl_output_done(void *data, struct wl_output *output)
-{
-	/* nop */
-}
-
-static void
-handle_wl_output_scale(void *data, struct wl_output *wl_output, int32_t factor)
-{
-	/* nop */
-}
-
-static void
-handle_wl_output_name(void *data, struct wl_output *wl_output, const char *name)
-{
-	/* nop */
-}
-
-static void
-handle_wl_output_description(void *data, struct wl_output *wl_output,
-		const char *description)
-{
-	/* nop */
-}
-
-static struct wl_output_listener output_listener = {
-	.geometry = handle_wl_output_geometry,
-	.mode = handle_wl_output_mode,
-	.done = handle_wl_output_done,
-	.scale = handle_wl_output_scale,
-	.name = handle_wl_output_name,
-	.description = handle_wl_output_description,
-};
-
-void
-output_init(struct state *state, struct wl_output *wl_output)
-{
-	struct output *output = calloc(1, sizeof(struct output));
-	output->state = state;
-	output->wl_output = wl_output;
-	wl_output_add_listener(output->wl_output, &output_listener, output);
-	wl_list_insert(&state->outputs, &output->link);
-}
-
-
-static void
 handle_wl_registry_global(void *data, struct wl_registry *registry,
 		uint32_t name, const char *interface, uint32_t version)
 {
@@ -304,10 +235,6 @@ handle_wl_registry_global(void *data, struct wl_registry *registry,
 	} else if (!strcmp(interface, zwlr_layer_shell_v1_interface.name)) {
 		state->layer_shell = wl_registry_bind(
 			registry, name, &zwlr_layer_shell_v1_interface, 4);
-	} else if (!strcmp(interface, wl_output_interface.name)) {
-		struct wl_output *wl_output = wl_registry_bind(registry, name,
-				&wl_output_interface, 4);
-		output_init(state, wl_output);
 	}
 }
 
@@ -371,8 +298,6 @@ print_keyboard_layout(struct seat *seat)
 int
 main(int argc, char *argv[])
 {
-	wl_list_init(&state.outputs);
-
 	state.display = wl_display_connect(NULL);
 	DIE_ON(!state.display, "unable to connect to compositor");
 
@@ -388,12 +313,6 @@ main(int argc, char *argv[])
 	state.surface = calloc(1, sizeof(struct surface));
 	state.surface->state = &state;
 	state.surface->surface = wl_compositor_create_surface(state.compositor);
-
-	struct output *output;
-	wl_list_for_each(output, &state.outputs, link) {
-		state.surface->wl_output = output->wl_output;
-		break;
-	}
 
 	surface_layer_surface_create(state.surface);
 
