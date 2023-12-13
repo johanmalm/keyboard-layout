@@ -12,7 +12,6 @@
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
 #include "loop.h"
-#include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
 struct state {
 	struct seat *seat;
@@ -22,7 +21,6 @@ struct state {
 	struct wl_shm *shm;
 	struct surface *surface;
 	struct loop *eventloop;
-	struct zwlr_layer_shell_v1 *layer_shell;
 };
 
 struct seat {
@@ -35,68 +33,32 @@ struct seat {
 	} xkb;
 };
 
-struct surface {
-	struct state *state;
-	struct wl_surface *surface;
-	struct zwlr_layer_surface_v1 *layer_surface;
-};
-
 static struct state state = { 0 };
 
 static void
-layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *layer_surface,
-		uint32_t serial, uint32_t width, uint32_t height)
+print_keyboard_layout(struct seat *seat)
 {
-	/* nop */
-}
-
-static void
-surface_destroy(struct surface *surface)
-{
-	if (surface->layer_surface) {
-		zwlr_layer_surface_v1_destroy(surface->layer_surface);
+	if (!seat || !seat->xkb.keymap) {
+		return;
 	}
-	if (surface->surface) {
-		wl_surface_destroy(surface->surface);
+	const char *layout_text = NULL;
+	xkb_layout_index_t num_layout = xkb_keymap_num_layouts(seat->xkb.keymap);
+	xkb_layout_index_t curr_layout = 0;
+
+	/* Advance to the first active layout (if any) */
+	while (curr_layout < num_layout
+			&& xkb_state_layout_index_is_active(seat->xkb.state,
+			curr_layout, XKB_STATE_LAYOUT_EFFECTIVE) != 1) {
+		++curr_layout;
 	}
-	free(surface);
-}
 
-static void
-layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *layer_surface)
-{
-	struct surface *surface = data;
-	surface_destroy(surface);
-}
+	if (curr_layout == num_layout) {
+		printf("unknown\n");
+		return;
+	}
 
-static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
-	.configure = layer_surface_configure,
-	.closed = layer_surface_closed,
-};
-
-void
-surface_layer_surface_create(struct surface *surface)
-{
-	struct state *state = surface->state;
-
-	assert(surface->surface);
-	surface->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
-		state->layer_shell, surface->surface, NULL,
-		ZWLR_LAYER_SHELL_V1_LAYER_TOP, "keyboard-layout");
-	assert(surface->layer_surface);
-
-	zwlr_layer_surface_v1_set_size(surface->layer_surface, 0, 0);
-	zwlr_layer_surface_v1_set_anchor(surface->layer_surface,
-			ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
-			ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
-			ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
-			ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
-	zwlr_layer_surface_v1_set_exclusive_zone(surface->layer_surface, -1);
-	zwlr_layer_surface_v1_set_keyboard_interactivity(
-			surface->layer_surface, true);
-	zwlr_layer_surface_v1_add_listener(surface->layer_surface,
-			&layer_surface_listener, surface);
-	wl_surface_commit(surface->surface);
+	layout_text = xkb_keymap_layout_get_name(seat->xkb.keymap, curr_layout);
+	printf("%s\n", layout_text);
 }
 
 static void
@@ -126,8 +88,6 @@ handle_wl_keyboard_keymap(void *data, struct wl_keyboard *wl_keyboard,
 	xkb_state_unref(seat->xkb.state);
 	seat->xkb.keymap = xkb_keymap;
 	seat->xkb.state = xkb_state;
-
-	seat->state->run_display = false;
 }
 
 static void
@@ -232,9 +192,6 @@ handle_wl_registry_global(void *data, struct wl_registry *registry,
 		struct wl_seat *wl_seat = wl_registry_bind(registry, name,
 				&wl_seat_interface, 7);
 		seat_init(state, wl_seat);
-	} else if (!strcmp(interface, zwlr_layer_shell_v1_interface.name)) {
-		state->layer_shell = wl_registry_bind(
-			registry, name, &zwlr_layer_shell_v1_interface, 4);
 	}
 }
 
@@ -265,32 +222,6 @@ display_in(int fd, short mask, void *data)
 	}
 }
 
-static void
-print_keyboard_layout(struct seat *seat)
-{
-	if (!seat || !seat->xkb.keymap) {
-		return;
-	}
-	const char *layout_text = NULL;
-	xkb_layout_index_t num_layout = xkb_keymap_num_layouts(seat->xkb.keymap);
-	xkb_layout_index_t curr_layout = 0;
-
-	/* Advance to the first active layout (if any) */
-	while (curr_layout < num_layout
-			&& xkb_state_layout_index_is_active(seat->xkb.state,
-			curr_layout, XKB_STATE_LAYOUT_EFFECTIVE) != 1) {
-		++curr_layout;
-	}
-
-	if (curr_layout == num_layout) {
-		printf("unknown\n");
-		return;
-	}
-
-	layout_text = xkb_keymap_layout_get_name(seat->xkb.keymap, curr_layout);
-	printf("%s\n", layout_text);
-}
-
 #define DIE_ON(condition, message) do { \
 	if ((condition) != 0) { \
 		fprintf(stderr, message); \
@@ -309,15 +240,8 @@ main(int argc, char *argv[])
 	DIE_ON(!state.compositor, "no compositor");
 	DIE_ON(!state.shm, "no shm");
 	DIE_ON(!state.seat, "no seat");
-	DIE_ON(!state.layer_shell, "no layer-shell");
 
 	state.seat->xkb.context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
-
-	state.surface = calloc(1, sizeof(struct surface));
-	state.surface->state = &state;
-	state.surface->surface = wl_compositor_create_surface(state.compositor);
-
-	surface_layer_surface_create(state.surface);
 
 	state.eventloop = loop_create();
 	loop_add_fd(state.eventloop, wl_display_get_fd(state.display), POLLIN,
@@ -325,14 +249,12 @@ main(int argc, char *argv[])
 
 	state.run_display = true;
 	while (state.run_display) {
+		print_keyboard_layout(state.seat);
 		errno = 0;
 		if (wl_display_flush(state.display) == -1 && errno != EAGAIN) {
 			break;
 		}
 		loop_poll(state.eventloop);
 	}
-	print_keyboard_layout(state.seat);
-
-	surface_destroy(state.surface);
 	return 0;
 }

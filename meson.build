@@ -41,7 +41,6 @@ client_protos_headers = []
 
 client_protocols = [
   [wl_protocol_dir, 'stable/xdg-shell/xdg-shell.xml'],
-  ['.', 'wlr-layer-shell-unstable-v1.xml'],
 ]
 
 foreach p : client_protocols
