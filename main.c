@@ -34,6 +34,7 @@ struct seat {
 };
 
 static struct state state = { 0 };
+static char last_name[4096] = { 0 };
 
 static void
 print_keyboard_layout(struct seat *seat)
@@ -41,7 +42,6 @@ print_keyboard_layout(struct seat *seat)
 	if (!seat || !seat->xkb.keymap) {
 		return;
 	}
-	const char *layout_text = NULL;
 	xkb_layout_index_t num_layout = xkb_keymap_num_layouts(seat->xkb.keymap);
 	xkb_layout_index_t curr_layout = 0;
 
@@ -57,8 +57,14 @@ print_keyboard_layout(struct seat *seat)
 		return;
 	}
 
-	layout_text = xkb_keymap_layout_get_name(seat->xkb.keymap, curr_layout);
-	printf("%s\n", layout_text);
+	const char *name = xkb_keymap_layout_get_name(seat->xkb.keymap, curr_layout);
+	if (!strcmp(last_name, name)) {
+		return;
+	}
+	snprintf(last_name, sizeof(last_name), "%s", name);
+
+	/* We could parse /usr/share/X11/xkb/rules/evdev.lst to get the layout here */
+	printf("%s\n", name);
 }
 
 static void
